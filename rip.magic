@@ -25,7 +25,7 @@ exit $1
 
 
 #───────────────────────────( directory structure )─────────────────────────────
-declare -- BASEDIR='/tidepool/media/'
+declare -- BASEDIR='/tidepool/media'
 
 # (As far as I know) there is no way to programatically determine if the DVD is
 # a show/movie. $OUTDIR will be set to $SHOW_DIR if the user passes --show,
