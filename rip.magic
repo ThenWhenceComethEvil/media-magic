@@ -1,0 +1,214 @@
+#!/bin/bash
+# Newest version of media magic, emphasizing legibility and extensibility. Aims
+# to support DVDs (Movies & Shows separately), and music CDs. I'm dipping the
+# hashing functionality present in the version of media magic for Mom & Papa. I
+# don't have the same use-case.
+
+# Limit tomfoolery.
+set -e
+trap 'sudo umount /dev/cdrom  2>/dev/null  && eject' EXIT
+
+if [[ $(id -u) -eq 0 ]] ; then
+   echo "May not be run as root." 2>&1
+   exit 1
+fi
+
+
+function usage {
+cat <<EOF
+./${BASH_SOURCE[0]} music | movie | show
+EOF
+
+# shellcheck disable=SC2086
+exit $1
+}
+
+
+#───────────────────────────( directory structure )─────────────────────────────
+declare -- BASEDIR='/tidepool/media/'
+
+# (As far as I know) there is no way to programatically determine if the DVD is
+# a show/movie. $OUTDIR will be set to $SHOW_DIR if the user passes --show,
+# $MOVIE_DIR for --movie, and $MUSIC_DIR for --music.
+declare -g OUTDIR
+
+# Shows:
+declare -- SHOW_DIR="${BASEDIR}/Shows"
+mkdir -p "${SHOW_DIR}"/{processing,vobs,name}
+# Shows
+#  ├── processing     #<- during vobcopy rip
+#  ├── vobs           #<- vobcopy'd rip
+#  └── name           #<- HandBrake'd tracks from `name` compiled into folders
+#       ├── Friends/
+#       └── The\ Office/
+
+declare -- MOVIE_DIR="${BASEDIR}/Movies"
+mkdir -p "${MOVIE_DIR}"/{processing,vobs,name}
+# Movies
+#  ├── processing     #<- during vobcopy rip
+#  ├── vobs           #<- vobcopy'd rip
+#  └── name           #<- HandBrake'd tracks from `name` compiled into folders
+#       ├── 'Practical Magic'
+#       └── 'The Holy Grail'     #<- These can either be standalone .mp4s, or
+#                                    directories themselves containing sub-
+#                                    tracks. See jellyfin Movie documentation.
+
+declare -- MUSIC_DIR="${BASEDIR}/Music"
+mkdir -p "${MUSIC_DIR}"/{flac,mp3,processing}
+# Music
+#  ├── processing     #<- during abcde ripping
+#  ├── flac           #<- lossless rips, goes here to sort into Marcus/Ginny
+#  │    ├── Ginny/
+#  │    └── Marcus/
+#  └── mp3            #<- lossy rips, goes here to sort into Marcus/Ginny
+#       ├── Ginny/
+#       └── Marcus/
+
+#───────────────────────────────( Show / Movie )────────────────────────────────
+# vobcopy may only be run on a mounted DVD.
+declare -g DVD_MOUNTPOINT='/mnt/cdrom/'
+
+# `lsdvd` gives title information 
+declare -g LSDVD_OUTPUT
+
+# Name of the DVD. How it's saved under ./processing/
+declare -g DVD_NAME
+
+# The final destination of the vob is variable. To prevent overwriting, we may
+# append a numeric suffix to the DVD name. This is needed as the entrypoint to
+# HandBrakeCLI.
+declare -g VOB_LOC
+
+
+function rip_dvd {
+   sudo mount /dev/cdrom "$DVD_MOUNTPOINT"
+
+   # Output of `lsdvd` is used to
+   #  1. Identify longest track for future runs of HandBrakeCLI
+   #  2. Save metadata in output directory for future reference
+   #
+   # shellcheck disable=SC2155
+   declare -g LSDVD_OUTPUT=$( lsdvd /dev/cdrom )
+
+   # shellcheck disable=SC2155
+   declare -g DVD_NAME=$(
+      awk '/^Disc Title/ {print $3}' <<< "$LSDVD_OUTPUT"
+   )
+
+   local params=(
+      --force    # vobcopy thinks there's insufficient space lel.
+      --mirror
+      --name "$DVD_NAME"
+      --input-dir "$DVD_MOUNTPOINT"
+      --output-dir "$OUTDIR/processing/"
+   ) ; vobcopy "${params[@]}"
+
+   save_metainfo
+   move_to_vob
+   handbrake
+}
+
+
+function save_metainfo {
+   local -- outdir="${OUTDIR}/processing/${DVD_NAME}"
+
+   # Longest track. Useful if we need to re-HandBrakeCLI, and need to know which
+   # track to target.
+   #
+   # shellcheck disable=SC2155
+   local -- longest=$( awk '/^Longest track:/ {print $3}' <<< "$LSDVD_OUTPUT" )
+
+   echo "$longest"      > "${outdir}/longest_track"
+   echo "$LSDVD_OUTPUT" > "${outdir}/lsdvd-output"
+}
+
+
+function move_to_vob {
+   local -- src="${OUTDIR}/processing/${DVD_NAME}"
+   local -- _dst="${OUTDIR}/vobs/${DVD_NAME}"
+
+   # Loop until unique:
+   local dst="$_dst"
+   local -i idx=0
+
+   while [[ -d "$dst" ]] ; do
+      ((++idx))
+      dst="${_dst}_${idx}"
+   done
+
+   # Move to final resting place.
+   mv "$src" "$dst"
+
+   declare -g VOB_LOC="$dst"
+}
+
+
+function handbrake {
+   local -- base="${OUTDIR}/name/${DVD_NAME}/"
+   mkdir -p "$base"
+
+   local -a params=(
+      --min-duration 120
+      --scan
+      -t 0
+      -i "${VOB_LOC}/VIDEO_TS"
+   )
+   local -a titles=( $(
+      HandBrakeCLI "${params[@]}" 2>&1 \
+      | awk '/+\stitle\s[[:digit:]]+:/ {print $3}'
+   ))
+
+   for idx in "${titles[@]/:}" ; do
+      name="${base}__$(printf -- '%02d' $idx)"
+
+      local -a run_params=(
+         --input "${VOB_LOC}/VIDEO_TS"
+         --title "$idx"
+         --preset 'Fast 1080p30'
+         --output "${base}/${name}.mp4"
+      ) ; HandBrakeCLI "${run_params[@]}"
+   done
+}
+
+
+#──────────────────────────────────( engage )───────────────────────────────────
+declare -- action
+declare -a args
+
+case "$1" in
+   'help' | '-h' | '--help')
+      usage 0 ;;
+
+   'show')
+      OUTDIR="$SHOW_DIR"
+      action=rip_dvd
+      ;;
+
+   'movie')
+      OUTDIR="$MOVIE_DIR"
+      action=rip_dvd
+      ;;
+
+   #'music')
+   #   shift ; args+=( "$1" )
+   #   OUTDIR="$MUSIC_DIR"
+   #   action=rip_music
+   #   ;;
+
+   *) usage 1 ;;
+esac
+
+# Wait until the DVD/CD is actually mounted and readable. `wodim` seems to fully
+# pause execution (if a disk is inserted) until we can proceed.
+declare -i retries=5
+while (( retries )); do
+   # ref: https://linux.die.net/man/2/wodim
+   wodim dev=/dev/cdrom -atip 1>/dev/null && break
+   sleep 1
+   (( --retries))
+done
+
+# If we used up all our retries, the drive was never found. Exit.
+(( retries )) || exit 1
+
+$action "${args[@]}"

@@ -1,0 +1,57 @@
+#!/bin/bash
+# Standalone utility for calling HandBrakeCLI for an already vobcopy`d DVD.
+# Can be used if something has gone awry with the rip, or if we happened to miss
+# a track or two.
+
+set -e
+
+input="$1"
+if [[ ! -d "$input" ]] ; then
+   echo "Input dir does not exist." 1>&2
+   exit -1
+fi
+
+outdir="$2"
+if [[ ! -e "$outdir" ]] ; then
+   echo "Output directory not specified." 1>&2
+   exit -2
+fi
+
+if [[ ! -e "$input"/VIDEO_TS ]] ; then
+   echo "Input must contain a VIDEO_TS/ directory." 1>&2
+   exit -3
+fi
+
+declare -a params=(
+   --min-duration 120
+   --scan
+   -t 0
+   --input "${input}/VIDEO_TS"
+)
+
+declare -a titles=( $(
+   HandBrakeCLI "${params[@]}" 2>&1 | awk '/+\stitle\s[[:digit:]]+:/ {print $3}'
+))
+
+echo -e "\n\ntitles:"
+declare -p titles
+echo -e "\n\n"
+
+# Everything (even movies) should be placed into a subdirectory. This allows for
+# special features, interviews, extras, etc, to be categorized appropriately.
+# See: https://jellyfin.org/docs/general/server/media/movies.html
+base="$(basename "$input")"
+mkdir -p "${outdir}/${base}"
+
+for idx in "${titles[@]/:}" ; do
+   name="${base}__$(printf -- '%02d' $idx)"
+
+   declare -a run_params=(
+      --input "${input}/VIDEO_TS"
+      --title "$idx"
+      --preset 'Fast 1080p30'
+      --output "${outdir}/${base}/${name}.mp4"
+   )
+
+   HandBrakeCLI "${run_params[@]}"
+done
