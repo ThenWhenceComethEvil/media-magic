@@ -144,7 +144,8 @@ function move_to_vob {
 
 
 function handbrake {
-   local -- base="${OUTDIR}/name/${DVD_NAME}/"
+   local -- name="$( basename "$VOB_LOC" )"
+   local -- base="${OUTDIR}/name/${name}/"
    mkdir -p "$base"
 
    local -a params=(
@@ -159,13 +160,13 @@ function handbrake {
    ))
 
    for idx in "${titles[@]/:}" ; do
-      name="${base}__$(printf -- '%02d' $idx)"
+      title_name="${base}__$(printf -- '%02d' $idx)"
 
       local -a run_params=(
          --input "${VOB_LOC}/VIDEO_TS"
          --title "$idx"
          --preset 'Fast 1080p30'
-         --output "${base}/${name}.mp4"
+         --output "${base}/${title_name}.mp4"
       ) ; HandBrakeCLI "${run_params[@]}"
    done
 }
