@@ -54,7 +54,7 @@ mkdir -p "${MOVIE_DIR}"/{processing,vobs,name}
 #                                    tracks. See jellyfin Movie documentation.
 
 declare -- MUSIC_DIR="${BASEDIR}/Music"
-mkdir -p "${MUSIC_DIR}"/{flac,mp3,processing}
+mkdir -p "${MUSIC_DIR}"/{processing,flac,mp3}
 # Music
 #  ├── processing     #<- during abcde ripping
 #  ├── flac           #<- lossless rips, goes here to sort into Marcus/Ginny
