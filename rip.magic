@@ -25,7 +25,7 @@ exit $1
 
 
 #───────────────────────────( directory structure )─────────────────────────────
-declare -- BASEDIR='/tidepool/media/'
+declare -- BASEDIR='/tidepool/media'
 
 # (As far as I know) there is no way to programatically determine if the DVD is
 # a show/movie. $OUTDIR will be set to $SHOW_DIR if the user passes --show,
@@ -171,9 +171,28 @@ function handbrake {
 }
 
 
+#───────────────────────────────( Show / Movie )────────────────────────────────
+function rip_music {
+   : 'Signicantly more straightforward than ripping a DVD. Thank you `abcde`.
+      The only tomfoolery here is the lockfile nonsense. Ensures we do not end
+      up with two instances of `abcde` running.'
+
+   local scriptname=$(basename -s ".sh" "${BASH_SOURCE[0]}")
+   local lockfile="/var/lock/${scriptname}.lock"
+
+   (
+      flock -e -n 100 || {
+         echo "Couldn't acquire lock: ${lockfile}"  1>&2
+         exit 3
+      }
+      /usr/bin/abcde -N
+
+   ) 100>"$lockfile"
+}
+
+
 #──────────────────────────────────( engage )───────────────────────────────────
-declare -- action
-declare -a args
+declare -- action=
 
 case "$1" in
    'help' | '-h' | '--help')
@@ -189,11 +208,10 @@ case "$1" in
       action=rip_dvd
       ;;
 
-   #'music')
-   #   shift ; args+=( "$1" )
-   #   OUTDIR="$MUSIC_DIR"
-   #   action=rip_music
-   #   ;;
+   'music')
+      OUTDIR="$MUSIC_DIR"
+      action=rip_music
+      ;;
 
    *) usage 1 ;;
 esac
@@ -211,4 +229,4 @@ done
 # If we used up all our retries, the drive was never found. Exit.
 (( retries )) || exit 1
 
-$action "${args[@]}"
+$action
