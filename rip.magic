@@ -177,15 +177,21 @@ function rip_music {
       The only tomfoolery here is the lockfile nonsense. Ensures we do not end
       up with two instances of `abcde` running.'
 
+   local whom="${1,,}"
+   if [[ ! "$whom" =~ (marcus|ginny) ]] ; then
+      echo "Ripping for whom: ['marcus', 'ginny']?"  1>&2
+      exit 3
+   fi
+
    local scriptname=$(basename -s ".sh" "${BASH_SOURCE[0]}")
-   local lockfile="${OUTDIR}/${scriptname}.lock"
+   local lockfile="${OUTDIR}/processing/${scriptname}.lock"
 
    (
       flock -e -n 100 || {
          echo "Couldn't acquire lock: ${lockfile}"  1>&2
          exit 3
       }
-      /usr/bin/abcde -N
+      /usr/bin/abcde -N -c "${OUTDIR}/${whom}.conf"
 
    ) 100>"$lockfile"
 }
@@ -193,6 +199,7 @@ function rip_music {
 
 #──────────────────────────────────( engage )───────────────────────────────────
 declare -- action=
+declare -a args=()
 
 case "$1" in
    'help' | '-h' | '--help')
@@ -209,9 +216,7 @@ case "$1" in
       ;;
 
    'music')
-      # The output is handled by `abcde.conf`, rather than specified here. May
-      # change the down the line so I can drop something directly into the 
-      # ./media/Music/Marcus or ./media/Music/Ginny folders.
+      shift ; args=( "$@" )
       OUTDIR="$MUSIC_DIR"
       action=rip_music
       ;;
@@ -232,4 +237,4 @@ done
 # If we used up all our retries, the drive was never found. Exit.
 (( retries )) || exit 1
 
-$action
+$action "${args[@]}"
