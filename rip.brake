@@ -44,8 +44,7 @@ base="$(basename "$input")"
 mkdir -p "${outdir}/${base}"
 
 for idx in "${titles[@]/:}" ; do
-   name="${base}__$(printf -- '%02d' $idx)"
-
+   declare -- name="${base}__$(printf -- '%02d' $idx)"
    declare -a run_params=(
       --input "${input}/VIDEO_TS"
       --title "$idx"

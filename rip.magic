@@ -160,8 +160,7 @@ function handbrake {
    ))
 
    for idx in "${titles[@]/:}" ; do
-      title_name="${base}__$(printf -- '%02d' $idx)"
-
+      local -- title_name="${name}__$(printf -- '%02d' $idx)"
       local -a run_params=(
          --input "${VOB_LOC}/VIDEO_TS"
          --title "$idx"
