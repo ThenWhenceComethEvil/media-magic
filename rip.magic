@@ -16,7 +16,7 @@ fi
 
 function usage {
 cat <<EOF
-./${BASH_SOURCE[0]} music | movie | show
+./$( basename ${BASH_SOURCE[0]} )  music | movie | show
 EOF
 
 # shellcheck disable=SC2086
@@ -178,7 +178,7 @@ function rip_music {
       up with two instances of `abcde` running.'
 
    local scriptname=$(basename -s ".sh" "${BASH_SOURCE[0]}")
-   local lockfile="/var/lock/${scriptname}.lock"
+   local lockfile="${OUTDIR}/${scriptname}.lock"
 
    (
       flock -e -n 100 || {
@@ -209,6 +209,9 @@ case "$1" in
       ;;
 
    'music')
+      # The output is handled by `abcde.conf`, rather than specified here. May
+      # change the down the line so I can drop something directly into the 
+      # ./media/Music/Marcus or ./media/Music/Ginny folders.
       OUTDIR="$MUSIC_DIR"
       action=rip_music
       ;;
@@ -221,7 +224,7 @@ esac
 declare -i retries=5
 while (( retries )); do
    # ref: https://linux.die.net/man/2/wodim
-   wodim dev=/dev/cdrom -atip 1>/dev/null && break
+   wodim dev=/dev/cdrom -atip &>/dev/null && break
    sleep 1
    (( --retries))
 done
