@@ -29,7 +29,7 @@ base="${input##*/}"
 mkdir -p "${outdir}/${base}"
 
 while read -r title_num ; do
-   local title_name="${name}__$(printf -- '%02d' $title_num)"
+   declare title_name="${name}__$(printf -- '%02d' $title_num)"
    declare -a run_params=(
       --input "${input}/VIDEO_TS"
       --title "$idx"
