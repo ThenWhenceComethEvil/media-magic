@@ -32,7 +32,7 @@ while read -r title_num ; do
    declare title_name="${name}__$(printf -- '%02d' $title_num)"
    declare -a run_params=(
       --input "${input}/VIDEO_TS"
-      --title "$idx"
+      --title "$title_num"
       --preset 'Fast 1080p30'
       --output "${outdir}/${base}/${title_name}.mp4"
    )
