@@ -157,7 +157,7 @@ function handbrake {
       HandBrakeCLI "${run_params[@]}"
    done < <(
       HandBrakeCLI --min-duration 120 --scan -t 0 -i "${VOB_LOC}/VIDEO_TS" 2>&1 \
-      | awk '/+\stitle\s[[:digit:]]+:/ {print $3}'
+      | awk '/+\stitle\s[[:digit:]]+:/ {sub(/:/, "", $3); print $3}'
    )
 }
 
