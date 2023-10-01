@@ -39,14 +39,14 @@ declare -g OUTDIR
 
 # Shows:
 declare SHOW_DIR="${BASEDIR}/Shows"
-mkdir -p "${SHOW_DIR}"/{processing,vobs,name}
+mkdir -p "${SHOW_DIR}"/{processing,vobs,sort_me_daddy}
 # Shows
 #  ├── processing
 #  ├── vobs
 #  └── sort_me_daddy
 
 declare MOVIE_DIR="${BASEDIR}/Movies"
-mkdir -p "${MOVIE_DIR}"/{processing,vobs,name}
+mkdir -p "${MOVIE_DIR}"/{processing,vobs,sort_me_daddy}
 # Movies
 #  ├── processing
 #  ├── vobs
