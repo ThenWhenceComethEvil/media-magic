@@ -16,7 +16,12 @@ fi
 
 function usage {
 cat <<EOF
-./$( basename ${BASH_SOURCE[0]} )  music | movie | show
+./$( basename ${BASH_SOURCE[0]} )  <command>
+
+commands
+   show        rips DVD, moves output to $SHOW_DIR
+   movie       rips DVD, moves output to $MOVIE_DIR
+   music WHO   rips CD for \$WHO, moves to their dir
 EOF
 
 # shellcheck disable=SC2086
@@ -25,7 +30,7 @@ exit $1
 
 
 #───────────────────────────( directory structure )─────────────────────────────
-declare -- BASEDIR='/tidepool/media'
+declare -g BASEDIR='/tidepool/media'
 
 # (As far as I know) there is no way to programatically determine if the DVD is
 # a show/movie. $OUTDIR will be set to $SHOW_DIR if the user passes --show,
@@ -33,34 +38,28 @@ declare -- BASEDIR='/tidepool/media'
 declare -g OUTDIR
 
 # Shows:
-declare -- SHOW_DIR="${BASEDIR}/Shows"
+declare SHOW_DIR="${BASEDIR}/Shows"
 mkdir -p "${SHOW_DIR}"/{processing,vobs,name}
 # Shows
-#  ├── processing     #<- during vobcopy rip
-#  ├── vobs           #<- vobcopy'd rip
-#  └── name           #<- HandBrake'd tracks from `name` compiled into folders
-#       ├── Friends/
-#       └── The\ Office/
+#  ├── processing
+#  ├── vobs
+#  └── sort_me_daddy
 
-declare -- MOVIE_DIR="${BASEDIR}/Movies"
+declare MOVIE_DIR="${BASEDIR}/Movies"
 mkdir -p "${MOVIE_DIR}"/{processing,vobs,name}
 # Movies
-#  ├── processing     #<- during vobcopy rip
-#  ├── vobs           #<- vobcopy'd rip
-#  └── name           #<- HandBrake'd tracks from `name` compiled into folders
-#       ├── 'Practical Magic'
-#       └── 'The Holy Grail'     #<- These can either be standalone .mp4s, or
-#                                    directories themselves containing sub-
-#                                    tracks. See jellyfin Movie documentation.
+#  ├── processing
+#  ├── vobs
+#  └── sort_me_daddy
 
-declare -- MUSIC_DIR="${BASEDIR}/Music"
+declare MUSIC_DIR="${BASEDIR}/Music"
 mkdir -p "${MUSIC_DIR}"/{processing,flac,mp3}
 # Music
-#  ├── processing     #<- during abcde ripping
-#  ├── flac           #<- lossless rips, goes here to sort into Marcus/Ginny
+#  ├── processing
+#  ├── flac
 #  │    ├── Ginny/
 #  │    └── Marcus/
-#  └── mp3            #<- lossy rips, goes here to sort into Marcus/Ginny
+#  └── mp3
 #       ├── Ginny/
 #       └── Marcus/
 
@@ -101,7 +100,8 @@ function rip_dvd {
       --name "$DVD_NAME"
       --input-dir "$DVD_MOUNTPOINT"
       --output-dir "$OUTDIR/processing/"
-   ) ; vobcopy "${params[@]}"
+   )
+   vobcopy "${params[@]}"
 
    save_metainfo
    move_to_vob
@@ -110,13 +110,13 @@ function rip_dvd {
 
 
 function save_metainfo {
-   local -- outdir="${OUTDIR}/processing/${DVD_NAME}"
+   local outdir="${OUTDIR}/processing/${DVD_NAME}"
 
    # Longest track. Useful if we need to re-HandBrakeCLI, and need to know which
    # track to target.
    #
    # shellcheck disable=SC2155
-   local -- longest=$( awk '/^Longest track:/ {print $3}' <<< "$LSDVD_OUTPUT" )
+   local longest=$( awk '/^Longest track:/ {print $3}' <<< "$LSDVD_OUTPUT" )
 
    echo "$longest"      > "${outdir}/longest_track"
    echo "$LSDVD_OUTPUT" > "${outdir}/lsdvd-output"
@@ -124,82 +124,70 @@ function save_metainfo {
 
 
 function move_to_vob {
-   local -- src="${OUTDIR}/processing/${DVD_NAME}"
-   local -- _dst="${OUTDIR}/vobs/${DVD_NAME}"
+   local src="${OUTDIR}/processing/${DVD_NAME}"
 
    # Loop until unique:
+   local _dst="${OUTDIR}/vobs/${DVD_NAME}"
    local dst="$_dst"
    local -i idx=0
 
    while [[ -d "$dst" ]] ; do
-      ((++idx))
+      (( ++idx ))
       dst="${_dst}_${idx}"
    done
 
-   # Move to final resting place.
    mv "$src" "$dst"
-
    declare -g VOB_LOC="$dst"
 }
 
 
 function handbrake {
-   local -- name="$( basename "$VOB_LOC" )"
-   local -- base="${OUTDIR}/name/${name}/"
+   local name="${VOB_LOC##*/}"
+   local base="${OUTDIR}/sort_me_daddy/${name}/"
    mkdir -p "$base"
 
-   local -a params=(
-      --min-duration 120
-      --scan
-      -t 0
-      -i "${VOB_LOC}/VIDEO_TS"
-   )
-   local -a titles=( $(
-      HandBrakeCLI "${params[@]}" 2>&1 \
-      | awk '/+\stitle\s[[:digit:]]+:/ {print $3}'
-   ))
-
-   for idx in "${titles[@]/:}" ; do
-      local -- title_name="${name}__$(printf -- '%02d' $idx)"
+   while read -r title_num ; do
+      local title_name="${name}__$(printf -- '%02d' $title_num)"
       local -a run_params=(
          --input "${VOB_LOC}/VIDEO_TS"
          --title "$idx"
          --preset 'Fast 1080p30'
          --output "${base}/${title_name}.mp4"
-      ) ; HandBrakeCLI "${run_params[@]}"
-   done
+      )
+      HandBrakeCLI "${run_params[@]}"
+   done < <(
+      HandBrakeCLI --min-duration 120 --scan -t 0 -i "${VOB_LOC}/VIDEO_TS" 2>&1 \
+      | awk '/+\stitle\s[[:digit:]]+:/ {print $3}'
+   )
 }
 
 
 #───────────────────────────────( Show / Movie )────────────────────────────────
 function rip_music {
-   : 'Signicantly more straightforward than ripping a DVD. Thank you `abcde`.
-      The only tomfoolery here is the lockfile nonsense. Ensures we do not end
-      up with two instances of `abcde` running.'
-
    local whom="${1,,}"
    if [[ ! "$whom" =~ (marcus|ginny) ]] ; then
-      echo "Ripping for whom: ['marcus', 'ginny']?"  1>&2
+      { printf 'Expecting either:\n'
+        printf '  rip.magic music ginny\n'
+        printf '  rip.magic music marcus\n'
+      } >&2
       exit 3
    fi
 
    local scriptname=$(basename -s ".sh" "${BASH_SOURCE[0]}")
    local lockfile="${OUTDIR}/processing/${scriptname}.lock"
 
-   (
-      flock -e -n 100 || {
+   (  if flock -e -n 100 ; then
+         /usr/bin/abcde -N -c "${OUTDIR}/${whom}.conf"
+      else
          echo "Couldn't acquire lock: ${lockfile}"  1>&2
          exit 3
-      }
-      /usr/bin/abcde -N -c "${OUTDIR}/${whom}.conf"
-
+      fi
    ) 100>"$lockfile"
 }
 
 
 #──────────────────────────────────( engage )───────────────────────────────────
-declare -- action=
-declare -a args=()
+declare -a action=()
 
 case "$1" in
    'help' | '-h' | '--help')
@@ -207,18 +195,17 @@ case "$1" in
 
    'show')
       OUTDIR="$SHOW_DIR"
-      action=rip_dvd
+      action=( rip_dvd )
       ;;
 
    'movie')
       OUTDIR="$MOVIE_DIR"
-      action=rip_dvd
+      action=( rip_dvd )
       ;;
 
    'music')
-      shift ; args=( "$@" )
+      shift ; action=( rip_music "$@" )
       OUTDIR="$MUSIC_DIR"
-      action=rip_music
       ;;
 
    *) usage 1 ;;
@@ -234,7 +221,7 @@ while (( retries )); do
    (( --retries))
 done
 
-# If we used up all our retries, the drive was never found. Exit.
+# Readable disk not found.
 (( retries )) || exit 1
 
-$action "${args[@]}"
+"${action[@]}"
