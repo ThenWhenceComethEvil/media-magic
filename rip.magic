@@ -3,6 +3,13 @@
 # to support DVDs (Movies & Shows separately), and music CDs. I'm dipping the
 # hashing functionality present in the version of media magic for Mom & Papa. I
 # don't have the same use-case.
+#
+#---------------------------------------------------------------------------------
+# TODO:
+#  [ ] inline a bit more stuff for DVD ripping, saves on many unnecessary
+#      global vars
+#
+#-------------------------------------------------------------------------------
 
 # Limit tomfoolery.
 set -e
@@ -16,12 +23,12 @@ fi
 
 function usage {
 cat <<EOF
-./$( basename ${BASH_SOURCE[0]} )  <command>
+usage: ${BASH_SOURCE[0]##*/} <command>
 
-commands
+commands:
    show        rips DVD, moves output to $SHOW_DIR
    movie       rips DVD, moves output to $MOVIE_DIR
-   music WHO   rips CD for \$WHO, moves to their dir
+   music WHO   rips CD, expecting \`marcus' or \`ginny'
 EOF
 
 # shellcheck disable=SC2086
@@ -142,23 +149,20 @@ function move_to_vob {
 
 
 function handbrake {
-   local name="${VOB_LOC##*/}"
-   local base="${OUTDIR}/sort_me_daddy/${name}/"
+   local base="${OUTDIR}/sort_me_daddy/${VOB_LOC##*/}"
    mkdir -p "$base"
 
-   while read -r title_num ; do
-      local title_name="${name}__$(printf -- '%02d' $title_num)"
-      local -a run_params=(
-         --input "${VOB_LOC}/VIDEO_TS"
-         --title "$idx"
-         --preset 'Fast 1080p30'
-         --output "${base}/${title_name}.mp4"
-      )
-      HandBrakeCLI "${run_params[@]}"
-   done < <(
-      HandBrakeCLI --min-duration 120 --scan -t 0 -i "${VOB_LOC}/VIDEO_TS" 2>&1 \
-      | awk '/+\stitle\s[[:digit:]]+:/ {sub(/:/, "", $3); print $3}'
-   )
+   HandBrakeCLI                                       \
+      --scan                                          \
+      --min-duration 60                               \
+      --title 0                                       \
+      --input "${VOB_LOC}/VIDEO_TS"                   \
+      2>&1                                            \
+   | awk '/+\stitle\s/ {sub(/:/, "", $3); print $3}'  \
+   | xargs -I{} HandBrakeCLI                          \
+      --title {}                                      \
+      --input "${VOB_LOC}/VIDEO_TS"                   \
+      --output "${base}/{}.mp4"
 }
 
 
@@ -173,8 +177,8 @@ function rip_music {
       exit 3
    fi
 
-   local scriptname=$(basename -s ".sh" "${BASH_SOURCE[0]}")
-   local lockfile="${OUTDIR}/processing/${scriptname}.lock"
+   local bash_source="${BASH_SOURCE[0]}"
+   local lockfile="${OUTDIR}/processing/${bash_source##*/}.lock"
 
    (  if flock -e -n 100 ; then
          /usr/bin/abcde -N -c "${OUTDIR}/${whom}.conf"
