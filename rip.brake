@@ -2,23 +2,25 @@
 # Standalone utility for calling HandBrakeCLI for an already vobcopy`d DVD.
 # Can be used if something has gone awry with the rip, or if we happened to miss
 # a track or two.
+#
+# shellcheck disable=SC2312
 
 set -e
 
 # Remove potential trailing slash.
 input="${1%/}"
-if [[ ! -d "$input" ]] ; then
+if [[ ! -d "${input}" ]] ; then
    echo "Input dir does not exist." 1>&2
    exit 1
 fi
 
 outdir="${2%/}"
-if [[ ! -e "$outdir" ]] ; then
+if [[ ! -e "${outdir}" ]] ; then
    echo "Output directory not specified." 1>&2
    exit 2
 fi
 
-if [[ ! -e "$input"/VIDEO_TS ]] ; then
+if [[ ! -e "${input}"/VIDEO_TS ]] ; then
    echo "Input must contain a VIDEO_TS/ directory." 1>&2
    exit 3
 fi

@@ -4,11 +4,7 @@
 # hashing functionality present in the version of media magic for Mom & Papa. I
 # don't have the same use-case.
 #
-#---------------------------------------------------------------------------------
-# TODO:
-#  [ ] inline a bit more stuff for DVD ripping, saves on many unnecessary
-#      global vars
-#
+# shellcheck disable=SC2312
 #-------------------------------------------------------------------------------
 
 # Limit tomfoolery.
@@ -26,23 +22,19 @@ cat <<EOF
 usage: ${BASH_SOURCE[0]##*/} <command>
 
 commands:
-   show        rips DVD, moves output to $SHOW_DIR
-   movie       rips DVD, moves output to $MOVIE_DIR
+   show        rips DVD, moves output to ${SHOW_DIR}
+   movie       rips DVD, moves output to ${MOVIE_DIR}
    music WHO   rips CD, expecting \`marcus' or \`ginny'
 EOF
 
-# shellcheck disable=SC2086
-exit $1
+exit "$1"
 }
 
+#
+#--- Directory structure -------------------------------------------------------
+#
 
-#───────────────────────────( directory structure )─────────────────────────────
 declare -g BASEDIR='/tidepool/media'
-
-# (As far as I know) there is no way to programatically determine if the DVD is
-# a show/movie. $OUTDIR will be set to $SHOW_DIR if the user passes --show,
-# $MOVIE_DIR for --movie, and $MUSIC_DIR for --music.
-declare -g OUTDIR
 
 # Shows:
 declare SHOW_DIR="${BASEDIR}/Shows"
@@ -70,127 +62,100 @@ mkdir -p "${MUSIC_DIR}"/{processing,flac,mp3}
 #       ├── Ginny/
 #       └── Marcus/
 
-#───────────────────────────────( Show / Movie )────────────────────────────────
+#
+#--- Show / Movie --------------------------------------------------------------
+#
+
 # vobcopy may only be run on a mounted DVD.
 declare -g DVD_MOUNTPOINT='/mnt/cdrom/'
 
-# `lsdvd` gives title information 
-declare -g LSDVD_OUTPUT
-
-# Name of the DVD. How it's saved under ./processing/
-declare -g DVD_NAME
-
-# The final destination of the vob is variable. To prevent overwriting, we may
-# append a numeric suffix to the DVD name. This is needed as the entrypoint to
-# HandBrakeCLI.
-declare -g VOB_LOC
-
 
 function rip_dvd {
-   sudo mount /dev/cdrom "$DVD_MOUNTPOINT"
+   local outdir="$1"
+
+   sudo mount /dev/cdrom "${DVD_MOUNTPOINT}"
 
    # Output of `lsdvd` is used to
    #  1. Identify longest track for future runs of HandBrakeCLI
    #  2. Save metadata in output directory for future reference
-   #
-   # shellcheck disable=SC2155
-   declare -g LSDVD_OUTPUT=$( lsdvd /dev/cdrom )
+   local lsdvd
+   lsdvd=$( lsdvd /dev/cdrom )
 
-   # shellcheck disable=SC2155
-   declare -g DVD_NAME=$(
-      awk '/^Disc Title/ {print $3}' <<< "$LSDVD_OUTPUT"
-   )
+   local dvd_name
+   dvd_name=$( awk '/^Disc Title/ {print $3}' <<< "${lsdvd}" )
 
    local params=(
       --force    # vobcopy thinks there's insufficient space lel.
       --mirror
-      --name "$DVD_NAME"
-      --input-dir "$DVD_MOUNTPOINT"
-      --output-dir "$OUTDIR/processing/"
+      --name "${dvd_name}"
+      --input-dir "${DVD_MOUNTPOINT}"
+      --output-dir "${outdir}/processing/"
    )
    vobcopy "${params[@]}"
 
-   save_metainfo
-   move_to_vob
-   handbrake
-}
+   local processing="${outdir}/processing/${dvd_name}"
 
+   # Useful if we need to re-HandBrakeCLI, largely for movies.
+   local longest
+   longest=$( awk '/^Longest track:/ {print $3}' <<< "${lsdvd}" )
 
-function save_metainfo {
-   local outdir="${OUTDIR}/processing/${DVD_NAME}"
-
-   # Longest track. Useful if we need to re-HandBrakeCLI, and need to know which
-   # track to target.
-   #
-   # shellcheck disable=SC2155
-   local longest=$( awk '/^Longest track:/ {print $3}' <<< "$LSDVD_OUTPUT" )
-
-   echo "$longest"      > "${outdir}/longest_track"
-   echo "$LSDVD_OUTPUT" > "${outdir}/lsdvd-output"
-}
-
-
-function move_to_vob {
-   local src="${OUTDIR}/processing/${DVD_NAME}"
+   echo "${longest}" > "${processing}/longest_track"
+   echo "${lsdvd}"   > "${processing}/lsdvd-output"
 
    # Loop until unique:
-   local _dst="${OUTDIR}/vobs/${DVD_NAME}"
-   local dst="$_dst"
+   local _dst="${outdir}/vobs/${dvd_name}"
+   local dst="${_dst}"
    local -i idx=0
 
-   while [[ -d "$dst" ]] ; do
-      (( ++idx ))
-      dst="${_dst}_${idx}"
+   while [[ -d "${dst}" ]] ; do
+      dst="${_dst}_$(( ++idx ))"
    done
 
-   mv "$src" "$dst"
-   declare -g VOB_LOC="$dst"
-}
+   mv "${processing}" "${dst}"
 
+   #                               handbrake
+   #----------------------------------------------------------------------------
+   # To avoid needing to constantly update the following section in parallel
+   # with `rip.brake`, could alternatively just call it here.
 
-function handbrake {
-   local base="${OUTDIR}/sort_me_daddy/${VOB_LOC##*/}"
-   mkdir -p "$base"
+   local final="${outdir}/sort_me_daddy/${dst##*/}"
+   mkdir -p "${final}"
 
    HandBrakeCLI                                       \
       --scan                                          \
       --min-duration 60                               \
       --title 0                                       \
-      --input "${VOB_LOC}/VIDEO_TS"                   \
+      --input "${dst}/VIDEO_TS"                       \
       2>&1                                            \
    | awk '/+\stitle\s/ {sub(/:/, "", $3); print $3}'  \
    | xargs -I{} HandBrakeCLI                          \
       --title {}                                      \
-      --input "${VOB_LOC}/VIDEO_TS"                   \
-      --output "${base}/{}.mp4"
+      --input "${dst}/VIDEO_TS"                       \
+      --output "${final}/{}.mp4"
 }
 
+#
+#--- Music ---------------------------------------------------------------------
+#
 
-#───────────────────────────────( Show / Movie )────────────────────────────────
 function rip_music {
-   local whom="${1,,}"
-   if [[ ! "$whom" =~ (marcus|ginny) ]] ; then
-      { printf 'Expecting either:\n'
-        printf '  rip.magic music ginny\n'
-        printf '  rip.magic music marcus\n'
-      } >&2
-      exit 3
-   fi
-
-   local bash_source="${BASH_SOURCE[0]}"
-   local lockfile="${OUTDIR}/processing/${bash_source##*/}.lock"
+   local outdir="$1"
+   local whom="$2"
 
    (  if flock -e -n 100 ; then
-         /usr/bin/abcde -N -c "${OUTDIR}/${whom}.conf"
+         export OUTPUTDIR=/tidepool/media/Music/${whom}/
+         /usr/bin/abcde -N
       else
-         echo "Couldn't acquire lock: ${lockfile}"  1>&2
+         printf "Couldn't acquire lock\n"  1>&2
          exit 3
       fi
-   ) 100>"$lockfile"
+   ) 100>"${outdir}/processing/rip.lock"
 }
 
+#                                   
+#--- engage! -------------------------------------------------------------------
+#
 
-#──────────────────────────────────( engage )───────────────────────────────────
 declare -a action=()
 
 case "$1" in
@@ -198,18 +163,25 @@ case "$1" in
       usage 0 ;;
 
    'show')
-      OUTDIR="$SHOW_DIR"
-      action=( rip_dvd )
+      action=( rip_dvd "${SHOW_DIR}" )
       ;;
 
    'movie')
-      OUTDIR="$MOVIE_DIR"
-      action=( rip_dvd )
+      action=( rip_dvd "${MOVIE_DIR}" )
       ;;
 
    'music')
-      shift ; action=( rip_music "$@" )
-      OUTDIR="$MUSIC_DIR"
+      shift
+
+      if [[ ! "$1" =~ (marcus|ginny) ]] ; then
+         { printf 'Expecting either:\n'
+           printf '  rip.magic music ginny\n'
+           printf '  rip.magic music marcus\n'
+         } >&2
+         exit 3
+      fi
+
+      action=( rip_music "${MUSIC_DIR}" "${1,,}" )
       ;;
 
    *) usage 1 ;;
