@@ -2,22 +2,25 @@
 # Standalone utility for calling HandBrakeCLI for an already vobcopy`d DVD.
 # Can be used if something has gone awry with the rip, or if we happened to miss
 # a track or two.
+#
+# shellcheck disable=SC2312
 
 set -e
 
-input="$1"
-if [[ ! -d "$input" ]] ; then
+# Remove potential trailing slash.
+input="${1%/}"
+if [[ ! -d "${input}" ]] ; then
    echo "Input dir does not exist." 1>&2
    exit 1
 fi
 
-outdir="$2"
-if [[ ! -e "$outdir" ]] ; then
+outdir="${2%/}"
+if [[ ! -e "${outdir}" ]] ; then
    echo "Output directory not specified." 1>&2
    exit 2
 fi
 
-if [[ ! -e "$input"/VIDEO_TS ]] ; then
+if [[ ! -e "${input}"/VIDEO_TS ]] ; then
    echo "Input must contain a VIDEO_TS/ directory." 1>&2
    exit 3
 fi
@@ -28,16 +31,33 @@ fi
 base="${input##*/}"
 mkdir -p "${outdir}/${base}"
 
-while read -r title_num ; do
-   declare title_name="${name}__$(printf -- '%02d' $title_num)"
-   declare -a run_params=(
-      --input "${input}/VIDEO_TS"
-      --title "$title_num"
-      --preset 'Fast 1080p30'
-      --output "${outdir}/${base}/${title_name}.mp4"
-   )
-   HandBrakeCLI "${run_params[@]}"
-done < <(
-   HandBrakeCLI --min-duration 12 --scan -t 0 --input "${input}/VIDEO_TS" 2>&1 \
-   | awk '/+\stitle\s[[:digit:]]+:/ {sub(/:/, "", $3) ; print $3}'
-)
+## Dropped the number of processes from 2->1, which I guess is no longer
+## "parallel". Largely just using it as xargs at this point, tbh. Maybe when
+## running on something with better hardware I can actually bump up --jobs.
+#HandBrakeCLI                                       \
+#   --scan                                          \
+#   --min-duration 60                               \
+#   --title 0                                       \
+#   --input "${input}/VIDEO_TS"                     \
+#   2>&1                                            \
+#| awk '/+\stitle\s/ {sub(/:/, "", $3); print $3}'  \
+#| parallel                                         \
+#   --jobs 1                                        \
+#   --progress                                      \
+#   --results ${outdir}/${base}/{}.log              \
+#   HandBrakeCLI                                    \
+#      --input "${input}"/VIDEO_TS                  \
+#      --title {}                                   \
+#      --output "${outdir}/${base}/{}.mp4"
+
+HandBrakeCLI                                       \
+   --scan                                          \
+   --min-duration 60                               \
+   --title 0                                       \
+   --input "${input}/VIDEO_TS"                     \
+   2>&1                                            \
+| awk '/+\stitle\s/ {sub(/:/, "", $3); print $3}'  \
+| xargs -I{} HandBrakeCLI                          \
+   --title {}                                      \
+   --input "${input}"/VIDEO_TS                     \
+   --output "${outdir}/${base}/{}.mp4"
